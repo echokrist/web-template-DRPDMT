@@ -1,0 +1,160 @@
+networks:
+  webapp:
+    name: webapp
+    driver: bridge
+  mailserver:
+    external: true
+    name: mailserver
+
+services:
+  # Load Balancer (Traefik)
+  loadbalancer:
+    container_name: loadbalancer
+    image: traefik:v3.0
+    ports:
+      - "80:80" # HTTP port for Traefik
+      - "8080:8080" # Dashboard port for Traefik
+    command:
+      - --api.insecure=true
+      - --providers.docker
+      - --providers.file.filename=traefik.yml
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik.yml:/config/traefik.yml:ro
+      - /usr/share/zoneinfo/Europe/Oslo:/etc/localtime:ro
+    restart: always
+    networks:
+      - webapp
+
+  # Frontend Web App
+  frontend:
+    container_name: frontend
+    networks:
+      - webapp
+    build:
+      context: ./frontend/
+      target: ${ENVIRONMENT:-development}
+    environment:
+      - APP_ENV=development
+      - APP_URL=http://frontend.local:8000
+      - APP_API_URL=http://backend:8080
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./frontend:/frontend
+      - deno_cache:/deno-dir
+      - /usr/share/zoneinfo/Europe/Oslo:/etc/localtime:ro
+    depends_on:
+      - loadbalancer
+    restart: always
+    labels:
+      # Traefik Routing Labels
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`frontend.local`) && PathPrefix(`/`)"
+      - "traefik.http.services.frontend.loadbalancer.server.port=8000"
+
+  # Backend API
+  backend:
+    container_name: backend
+    networks:
+      - webapp
+    build:
+      context: ./backend/api/
+      target: ${ENVIRONMENT:-development}
+    environment:
+      - DATABASE_URL=postgres://admin:adminpassword@database:5432/main
+      - CACHE_URL=redis://dragonfly:6379
+      - MAILSERVER_URL=smtp://mailserver:25
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./backend/api:/backend
+      - /usr/share/zoneinfo/Europe/Oslo:/etc/localtime:ro
+    depends_on:
+      - loadbalancer
+      - frontend
+    restart: always
+    labels:
+      # Traefik Routing Labels
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`backend.local`) && PathPrefix(`/`)"
+      - "traefik.http.services.backend.loadbalancer.server.port=8080"
+
+  # Database (Postgres)
+  database:
+    container_name: database
+    image: postgres:17.2-alpine
+    networks:
+      - webapp
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: adminpassword
+      POSTGRES_DB: main
+    ports:
+      - "5432:5432"
+    volumes:
+      - database_data:/var/lib/postgresql/data
+      - /usr/share/zoneinfo/Europe/Oslo:/etc/localtime:ro
+    depends_on:
+      - backend
+    restart: always
+
+  # Cache (Dragonfly)
+  cache:
+    container_name: cache
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
+    networks:
+      - webapp
+    ulimits:
+      memlock: -1
+    ports:
+      - "6379:6379"
+    volumes:
+      - cache_data:/data
+      - /usr/share/zoneinfo/Europe/Oslo:/etc/localtime:ro
+    depends_on:
+      - backend
+    restart: always
+
+  # Mail Server
+  mailserver:
+    container_name: mailserver
+    image: ghcr.io/docker-mailserver/docker-mailserver:14
+    networks:
+      - mailserver
+      - webapp
+    hostname: mail.example.com
+    ports:
+      - "25:25" # SMTP
+      - "465:465" # SMTPS
+      - "587:587" # Submission
+      - "110:110" # POP3
+      - "995:995" # POP3S
+      - "143:143" # IMAP
+      - "993:993" # IMAPS
+    volumes:
+      - mailserver_data:/tmp/docker-mailserver
+      - mailserver_data:/var/mail
+      - /usr/share/zoneinfo/Europe/Oslo:/etc/localtime:ro
+    environment:
+      - ENABLE_SPAMASSASSIN=1
+      - ENABLE_CLAMAV=1
+      - ENABLE_FAIL2BAN=1
+      - ONE_DIR=1
+    depends_on:
+      - loadbalancer
+      - frontend
+      - backend
+      - database
+    restart: always
+    labels:
+      # Traefik Routing Labels
+      - "traefik.enable=true"
+      - "traefik.http.routers.mailserver.rule=Host(`mail.example.com`)"
+      - "traefik.http.services.mailserver.loadbalancer.server.port=25"
+
+volumes:
+  deno_cache:
+  database_data:
+  cache_data:
+  mailserver_data:

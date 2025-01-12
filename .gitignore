@@ -1,0 +1,43 @@
+# Root-level ignores
+*.log
+*.pid
+docker-compose.override.yml
+docker-compose.override.*.yml
+traefik.yml
+/config/traefik.yml
+database_data/
+cache_data/
+mailserver_data/
+*.sql
+*.dump
+
+# Frontend-specific ignores (Deno Fresh)
+frontend/deno-dir/
+frontend/dist/
+frontend/build/
+frontend/.fresh/
+frontend/static/
+
+# Backend-specific ignores (Rust Actix)
+# Rust build directory
+backend/api/target/
+# Rust incremental compilation files
+backend/api/target/debug/incremental/
+# Rust dependency registry and build cache
+backend/api/.cargo/
+backend/api/.rustc/
+# Temporary files during Rust builds
+backend/api/*.rs.bk
+
+# Editor and IDE-specific ignores
+.vscode/
+.idea/
+*.swp
+
+# System-specific ignores
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.local
